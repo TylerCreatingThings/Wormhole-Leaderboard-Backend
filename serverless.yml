@@ -1,0 +1,143 @@
+org: tylerfarkas
+app: wormhole
+service: sls-wormhole
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  region: ${env:AWS_REGION, 'ca-central-1'}
+  stage: ${env:STAGE, 'dev'}
+
+plugins:
+  - serverless-dynamodb-local
+  - serverless-esbuild
+  - serverless-dotenv-plugin
+  - serverless-offline
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    exclude: 'aws-sdk'
+    target: node14
+    define:
+      'require.resolve': undefined
+    platform: node
+    concurrency: 10
+  dynamodb:
+    stages:
+      - dev
+    start:
+      port: 8000
+      inMemory: true
+      heapInitial: 200m
+      heapMax: 1g
+      migrate: true
+      seed: true
+      convertEmptyValues: true
+
+package:
+  patterns: "*"
+
+
+functions:
+  leaderboard-position-user:
+    description: Get 15 users above, and current position
+    handler: src/main/lambda-functions/userPosition/index.getUserPositionHandler
+    timeout: 30
+    memorySize: 2048
+    events:
+      - http:
+          path: leaderboard-position-user
+          method: POST
+          cors: true
+  top-100-users:
+    description: Get top 100 users
+    handler: src/main/lambda-functions/top100Users/index.getTop100UsersHandler
+    timeout: 30
+    memorySize: 2048
+    events:
+      - http:
+          path: top-100-users
+          method: GET
+  upsert-user:
+    description: Called to upsert user
+    handler: src/main/lambda-functions/upsertUser/index.upsertUserHandler
+    timeout: 30
+    memorySize: 2048
+    events:
+      - http:
+          path: upsert-user
+          method: POST
+          cors: true
+
+resources:
+  Resources:
+    WormholeDynamoTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName:  ${env:DYNAMODB_TABLE, 'Users'}
+        AttributeDefinitions:
+          - AttributeName: BestTime
+            AttributeType: S
+          - AttributeName: SteamId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: SteamId
+            KeyType: HASH 
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1      
+        GlobalSecondaryIndexes:
+        - IndexName: BestTime_Index
+          Projection:
+            ProjectionType: 'ALL'
+          KeySchema:
+            - AttributeName: SteamId
+              KeyType: HASH
+            - AttributeName: BestTime
+              KeyType: RANGE
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+    WormholeLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: WormholeLambda
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: DynamoDBWriteAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: 
+                    - 'Fn::Join':
+                      - ':'
+                      -
+                        - 'arn:aws:logs'
+                        - Ref: 'AWS::Region'
+                        - Ref: 'AWS::AccountId'
+                        - 'log-group:/aws/lambda/*:*:*'
+                - Effect: Allow
+                  Action:
+                    - dynamodb:PutItem
+                  Resource:
+                    'Fn::GetAtt': [ WormholeDynamoTable, Arn ]
+  Outputs:
+    WormholeDynamoDbARN:
+      Description: "Wormhole DynamoDB ARN"
+      Value:
+        "Fn::GetAtt": [ WormholeDynamoTable, Arn ]
