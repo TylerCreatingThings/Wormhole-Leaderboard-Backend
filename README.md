@@ -1,6 +1,6 @@
 # Serverless Wormhole Leaderboard
 
-## Endpoints (HW Problem)
+## Endpoints
 
 Additional details can be found in the handlers for each of the below endpoints in [`src/index.ts`](./src/index.ts)
 
